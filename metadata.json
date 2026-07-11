@@ -1,0 +1,6 @@
+{
+  "name": "Image Analyzer",
+  "description": "Analyze image dimensions, file size, formats, EXIF metadata, compression ratio, and count unique colors, with a beautiful Material 3 native interface.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
