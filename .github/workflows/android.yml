@@ -1,4 +1,4 @@
-name: Android CI with Gradle 8.5 + JDK 17
+name: Android CI with Gradle 9.3.1 + JDK 17
 
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
         cache: gradle
 
     - name: Generate Gradle Wrapper
-      run: gradle wrapper --gradle-version 8.5
+      run: gradle wrapper --gradle-version 9.3.1
 
     - name: Prepare environment files and configure Gradle properties
       run: |
