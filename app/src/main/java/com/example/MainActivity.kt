@@ -170,13 +170,20 @@ fun MainScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            selectedImageUri = uri
-            uniqueColorsResult = "-"
-            isCalculatingColors = false
-            
             // Perform basic metadata analysis
             val result = analyzeImage(context, uri)
-            analysisResult = result
+            if (result == null) {
+                Toast.makeText(context, "対応していないファイル形式か、画像が破損しています。", Toast.LENGTH_LONG).show()
+                selectedImageUri = null
+                analysisResult = null
+                uniqueColorsResult = "-"
+                isCalculatingColors = false
+            } else {
+                selectedImageUri = uri
+                uniqueColorsResult = "-"
+                isCalculatingColors = false
+                analysisResult = result
+            }
         }
     }
 
@@ -451,8 +458,8 @@ fun MainScreen(
                                             onClick = {
                                                 coroutineScope.launch {
                                                     isCalculatingColors = true
-                                                    val colors = countUniqueColors(context, selectedImageUri!!)
-                                                    uniqueColorsResult = if (colors > 0) colors.toLocaleString() else "計測不可"
+                                                    val colorsText = countUniqueColors(context, selectedImageUri!!)
+                                                    uniqueColorsResult = colorsText
                                                     isCalculatingColors = false
                                                 }
                                             },
@@ -533,19 +540,26 @@ fun MainScreen(
             onDismissRequest = { showExportDialog = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.9f)),
-                color = Color.Black.copy(alpha = 0.9f)
-            ) {
+            Scaffold(
+                containerColor = Color.Black.copy(alpha = 0.95f),
+                modifier = Modifier.fillMaxSize()
+            ) { dialogPadding ->
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .padding(dialogPadding)
                         .padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
+                    Text(
+                        text = "ログ画像 (レポートプレビュー)",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
                     // Report image preview
                     Box(
                         modifier = Modifier
@@ -568,7 +582,7 @@ fun MainScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 16.dp),
+                            .padding(bottom = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -576,10 +590,10 @@ fun MainScreen(
                         Button(
                             onClick = { showExportDialog = false },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF222222),
+                                containerColor = Color(0xFF333333),
                                 contentColor = Color.White
                             ),
-                            shape = RoundedCornerShape(4.dp),
+                            shape = RoundedCornerShape(6.dp),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
@@ -602,15 +616,15 @@ fun MainScreen(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = Color.White
                             ),
-                            shape = RoundedCornerShape(4.dp),
+                            shape = RoundedCornerShape(6.dp),
                             modifier = Modifier
-                                .weight(1f)
+                                .weight(1.5f)
                                 .height(48.dp)
                                 .testTag("btn_save_dialog")
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("保存", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("保存する", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
 
                         // Share button
@@ -621,7 +635,7 @@ fun MainScreen(
                             ),
                             modifier = Modifier
                                 .size(48.dp)
-                                .clip(RoundedCornerShape(4.dp))
+                                .clip(RoundedCornerShape(6.dp))
                                 .testTag("btn_share_dialog")
                         ) {
                             Icon(Icons.Default.Share, contentDescription = "Share Report", tint = Color.White)
@@ -887,40 +901,77 @@ fun analyzeImage(context: Context, uri: Uri): ImageAnalysisResult? {
 }
 
 // Memory efficient row-by-row color counting to avoid OutOfMemoryError on Android heap
-suspend fun countUniqueColors(context: Context, uri: Uri): Int = withContext(Dispatchers.Default) {
-    var uniqueCount = 0
+suspend fun countUniqueColors(context: Context, uri: Uri): String = withContext(Dispatchers.Default) {
     try {
         val contentResolver = context.contentResolver
+        
+        // Size estimation for safety sampling
+        val sizeOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, sizeOptions)
+        }
+        val w = sizeOptions.outWidth
+        val h = sizeOptions.outHeight
+        if (w <= 0 || h <= 0) return@withContext "計測不可"
+
+        // To avoid OutOfMemory, sample down if image has more than 1M pixels (e.g., 1000x1000 equivalent)
+        val maxPixels = 1_000_000L
+        val totalPixels = w.toLong() * h.toLong()
+        var inSampleSize = 1
+        if (totalPixels > maxPixels) {
+            val ratio = Math.sqrt(totalPixels.toDouble() / maxPixels.toDouble())
+            inSampleSize = Math.ceil(ratio).toInt().coerceAtLeast(1)
+        }
+
         val options = BitmapFactory.Options().apply {
             inPreferredConfig = Bitmap.Config.ARGB_8888
+            this.inSampleSize = inSampleSize
         }
 
         val bitmap = contentResolver.openInputStream(uri)?.use { input ->
             BitmapFactory.decodeStream(input, null, options)
-        } ?: return@withContext 0
+        } ?: return@withContext "計測不可"
 
-        val w = bitmap.width
-        val h = bitmap.height
+        val decodedW = bitmap.width
+        val decodedH = bitmap.height
 
-        // Initialize set with reasonable starting size
-        val colorSet = HashSet<Int>(Math.min(w * h, 1_000_000))
-        val rowPixels = IntArray(w)
+        // Memory guarding: limit unique colors to 100k, exit early to avoid heavy memory allocation in HashSet
+        val maxUniqueColorsLimit = 100_000
+        val colorSet = HashSet<Int>(Math.min(decodedW * decodedH, 20_000))
+        val rowPixels = IntArray(decodedW)
+        var limitReached = false
 
-        for (y in 0 until h) {
-            bitmap.getPixels(rowPixels, 0, w, 0, y, w, 1)
-            for (x in 0 until w) {
+        for (y in 0 until decodedH) {
+            bitmap.getPixels(rowPixels, 0, decodedW, 0, y, decodedW, 1)
+            for (x in 0 until decodedW) {
                 colorSet.add(rowPixels[x])
+                if (colorSet.size >= maxUniqueColorsLimit) {
+                    limitReached = true
+                    break
+                }
             }
+            if (limitReached) break
             if (y % 100 == 0) {
-                yield() // Cooperatively support cancellation and avoid blocking the execution thread
+                yield()
             }
         }
-        uniqueCount = colorSet.size
+        
+        val size = colorSet.size
         bitmap.recycle()
+
+        val prefix = if (inSampleSize > 1) "約 " else ""
+        if (limitReached) {
+            "${prefix}${maxUniqueColorsLimit.toLocaleString()}+ 色 (非常に多い)"
+        } else {
+            "${prefix}${size.toLocaleString()} 色"
+        }
+    } catch (e: OutOfMemoryError) {
+        System.gc()
+        "計測不可 (メモリ制限)"
     } catch (e: Exception) {
         e.printStackTrace()
+        "計測不可"
     }
-    uniqueCount
 }
 
 // 3. PNG Generation Canvas Engine
