@@ -26,15 +26,8 @@ jobs:
         java-version: '17'
         cache: gradle
 
-    - name: Set permissions and fix line endings for gradlew
-      run: |
-        sed -i -e 's/\r$//' ./gradlew
-        chmod +x ./gradlew
-
-    - name: Download authentic Gradle Wrapper JAR
-      run: |
-        mkdir -p gradle/wrapper
-        curl -Lo gradle/wrapper/gradle-wrapper.jar https://raw.githubusercontent.com/gradle/gradle/v8.5/gradle/wrapper/gradle-wrapper.jar
+    - name: Generate Gradle Wrapper
+      run: gradle wrapper --gradle-version 8.5
 
     - name: Prepare environment files and configure Gradle properties
       run: |
